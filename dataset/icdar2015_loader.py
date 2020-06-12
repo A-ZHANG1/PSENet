@@ -163,8 +163,10 @@ class IC15Loader(data.Dataset):
 
         #data_dirs = [ic15_train_data_dir]
         #gt_dirs = [ic15_train_gt_dir]
-        data_dirs = [funs_train_data_dir]
-        gt_dirs = [funs_train_gt_dir]
+        # data_dirs = [funs_train_data_dir]
+        # gt_dirs = [funs_train_gt_dir]
+        data_dirs = [sr19_train_data_dir]
+        gt_dirs = [sr19_train_gt_dir]
 
         self.img_paths = []
         self.gt_paths = []

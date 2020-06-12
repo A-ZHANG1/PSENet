@@ -17,6 +17,8 @@ from util import Logger, AverageMeter
 import time
 import util
 
+from torch.utils.tensorboard import SummaryWriter
+
 def ohem_single(score, gt_text, training_mask):
     pos_num = (int)(np.sum(gt_text > 0.5)) - (int)(np.sum((gt_text > 0.5) & (training_mask <= 0.5)))
     
@@ -118,6 +120,7 @@ def train(train_loader, model, criterion, optimizer, epoch):
         training_masks = Variable(training_masks.cuda())
 
         outputs = model(imgs)
+
         texts = outputs[:, 0, :, :]
         kernels = outputs[:, 1:, :, :]
 
@@ -152,7 +155,8 @@ def train(train_loader, model, criterion, optimizer, epoch):
         batch_time.update(time.time() - end)
         end = time.time()
 
-        if batch_idx % 20 == 0:
+        if batch_idx % 10 == 0:
+
             output_log  = '({batch}/{size}) Batch: {bt:.3f}s | TOTAL: {total:.0f}min | ETA: {eta:.0f}min | Loss: {loss:.4f} | Acc_t: {acc: .4f} | IOU_t: {iou_t: .4f} | IOU_k: {iou_k: .4f}'.format(
                 batch=batch_idx + 1,
                 size=len(train_loader),
@@ -216,6 +220,8 @@ def main(args):
         model = models.resnet101(pretrained=True, num_classes=kernel_num)
     elif args.arch == "resnet152":
         model = models.resnet152(pretrained=True, num_classes=kernel_num)
+    elif args.arch == "pvanet":
+        model = models.pvanet(inputsize=args.img_size, num_classes = kernel_num)
     
     model = torch.nn.DataParallel(model).cuda()
     
@@ -230,20 +236,20 @@ def main(args):
         assert os.path.isfile(args.pretrain), 'Error: no checkpoint directory found!'
         checkpoint = torch.load(args.pretrain)
         model.load_state_dict(checkpoint['state_dict'])
-           
-        grad = [
-            'module.conv2.weight'
-            'module.conv2.bias',
-            'module.bn2.weight',
-            'module.bn2.bias',
-            'module.conv3.weight',
-            'module.conv3.bias'
-        ]	
-        for name,value in model.named_parameters():
-            if name in grad:
-                value.requires_grad = True
-            else:
-                value.requires_grad = False
+        # fine tune output layers
+        # grad = [
+        #     'module.conv2.weight'
+        #     'module.conv2.bias',
+        #     'module.bn2.weight',
+        #     'module.bn2.bias',
+        #     'module.conv3.weight',
+        #     'module.conv3.bias'
+        # ]	
+        # for name,value in model.named_parameters():
+        #     if name in grad:
+        #         value.requires_grad = True
+        #     else:
+        #         value.requires_grad = False
         logger = Logger(os.path.join(args.checkpoint, 'log.txt'), title=title)
         logger.set_names(['Learning Rate', 'Train Loss','Train Acc.', 'Train IOU.'])
     elif args.resume:
@@ -259,6 +265,8 @@ def main(args):
         logger = Logger(os.path.join(args.checkpoint, 'log.txt'), title=title)
         logger.set_names(['Learning Rate', 'Train Loss','Train Acc.', 'Train IOU.'])
 
+    writer = SummaryWriter(args.summary_path)
+
     for epoch in range(start_epoch, args.n_epoch):
         adjust_learning_rate(args, optimizer, epoch)
         print('\nEpoch: [%d | %d] LR: %f' % (epoch + 1, args.n_epoch, optimizer.param_groups[0]['lr']))
@@ -271,12 +279,19 @@ def main(args):
                 'optimizer' : optimizer.state_dict(),
             }, checkpoint=args.checkpoint)
 
+        writer.add_scalar('Loss', train_loss, epoch)
+        writer.add_scalar('train_te_acc', train_te_acc, epoch)
+        writer.add_scalar('train_te_iou', train_te_iou, epoch)
+        writer.flush()
+
         logger.append([optimizer.param_groups[0]['lr'], train_loss, train_te_acc, train_te_iou])
     logger.close()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Hyperparams')
-    parser.add_argument('--arch', nargs='?', type=str, default='resnet50')
+    # parser.add_argument('--arch', nargs='?', type=str, default='resnet50')
+    parser.add_argument('--arch', nargs='?', type=str, default='pvanet')
+
     parser.add_argument('--img_size', nargs='?', type=int, default=640, 
                         help='Height of the input image')
     parser.add_argument('--n_epoch', nargs='?', type=int, default=300, 
@@ -289,10 +304,13 @@ if __name__ == '__main__':
                         help='Learning Rate')
     parser.add_argument('--resume', nargs='?', type=str, default=None,    
                         help='Path to previous saved model to restart from')
-    parser.add_argument('--pretrain', nargs='?', type=str, default='./ic15_res50_pretrain_ic17.pth.tar',    
+    # parser.add_argument('--pretrain', nargs='?', type=str, default='./ic15_res50_pretrain_ic17.pth.tar',  
+    parser.add_argument('--pretrain', nargs='?', type=str, default=None,    
                         help='Path to previous saved model to restart from')
-    parser.add_argument('--checkpoint', default='', type=str, metavar='PATH',
+    parser.add_argument('--checkpoint', default='./ckpt_pva', type=str, metavar='PATH',
                     help='path to save checkpoint (default: checkpoint)')
+    parser.add_argument('--summary_path', default='./summary_pva', type=str, metavar='PATH',
+                    help='path to save summary (default: tensorboard)')
     args = parser.parse_args()
 
     main(args)
